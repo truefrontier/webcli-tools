@@ -1,6 +1,17 @@
 {
   "repo": "https://github.com/truefrontier/webcli-tools",
   "archive": "https://codeload.github.com/truefrontier/webcli-tools/tar.gz/{commit}",
-  "tools": [],
+  "tools": [
+    {
+      "name": "httpbin",
+      "version": "0.1.0",
+      "summary": "httpbin.org, read-only demo: your public IP, the headers it sees, a fresh UUID. No sign-in, no browser",
+      "commit": "a16894641522657ac7ecb003abce04c3b820bfc1",
+      "sha256": "7aec67175855a0582f9f2a4dbe2deb74eeefd10c52cf81cefe0ecf4b406ff650",
+      "path": "tools/httpbin",
+      "tier": "community",
+      "verified": false
+    }
+  ],
   "revoked": []
 }
