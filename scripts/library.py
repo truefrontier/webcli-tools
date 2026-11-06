@@ -2,6 +2,7 @@
 
     python scripts/library.py check               # what CI runs: index.json, every tool and TEMPLATE, secrets
     python scripts/library.py pin NAME [COMMIT]   # point NAME's index.json entry at COMMIT (default HEAD)
+    python scripts/library.py builtins            # rewrite the official built-ins' entries from this webcli
 
 It needs git, and webcli 1.0 or later (`webcli lint` and `webcli test`) on PATH and importable. `check` also runs
 pytest in each tool's folder when pytest is installed.
@@ -38,6 +39,16 @@ NAME = re.compile(r"[a-z][a-z0-9]{1,31}")
 VERSION = re.compile(r"\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?")
 HEX40, HEX64 = re.compile(r"[0-9a-f]{40}"), re.compile(r"[0-9a-f]{64}")
 ENTRY_KEYS = {"name", "version", "summary", "commit", "sha256", "path", "tier", "verified"}
+BUILTIN_KEYS = {"name", "version", "summary", "tier", "builtin", "verified", "requires_webcli", "source", "identity",
+                "hosts", "commands"}  # and optionally "docs"
+STRATEGIES = {"public", "cookie", "intercept", "ui"}
+WEBCLI_DOCS = "https://github.com/truefrontier/webcli/blob/main/docs/"
+# The best doc in webcli's docs/ for each built-in; one without a doc gets no "docs" key.
+DOCS = {"amazon": "amazon-site.md", "gsc": "gsc-site.md", "messages": "messages-site.md",
+        "notebooklm": "notebooklm-site.md", "whatsapp": "whatsapp-site.md",
+        **dict.fromkeys(("contacts", "gmail", "keep", "photos", "recorder", "youtube"), "google-data-sites.md"),
+        **dict.fromkeys(("facebook", "linkedin", "loom"), "social-data-sites.md"),
+        **dict.fromkeys(("gnews", "perplexity"), "feed.md")}
 
 
 def git(*args: str) -> str:
@@ -72,9 +83,34 @@ def load_index() -> dict:
     return json.loads(INDEX.read_text(encoding="utf-8"))
 
 
+def check_builtin(entry: dict, where: str) -> list[str]:
+    """An official built-in's catalog entry: it ships inside webcli, so it has no commit, sha256, or path."""
+    if not BUILTIN_KEYS <= set(entry) <= BUILTIN_KEYS | {"docs"}:
+        return [f"{where}: a built-in needs exactly {', '.join(sorted(BUILTIN_KEYS))}, and optionally docs "
+                "(never commit, sha256, or path)"]
+    commands = entry["commands"]
+    shape = {"name": isinstance(entry["name"], str) and NAME.fullmatch(entry["name"]),
+             "version": isinstance(entry["version"], str) and VERSION.fullmatch(entry["version"]),
+             "summary": isinstance(entry["summary"], str) and entry["summary"],
+             "tier": entry["tier"] == "official",
+             "verified": entry["verified"] is True,
+             "requires_webcli": isinstance(entry["requires_webcli"], str) and entry["requires_webcli"],
+             "source": entry["source"] == "core",
+             "identity": isinstance(entry["identity"], str) and NAME.fullmatch(entry["identity"]),
+             "hosts": isinstance(entry["hosts"], list) and all(isinstance(h, str) for h in entry["hosts"]),
+             "commands": isinstance(commands, list) and all(
+                 isinstance(c, dict) and set(c) == {"name", "strategy", "writes"} and isinstance(c["name"], str)
+                 and c["name"] and c["strategy"] in STRATEGIES and isinstance(c["writes"], bool) for c in commands),
+             "docs": isinstance(entry.get("docs", WEBCLI_DOCS), str) and entry.get("docs", WEBCLI_DOCS).startswith(
+                 WEBCLI_DOCS)}
+    wrong = [key for key, ok in shape.items() if not ok]
+    return [f"{where}: bad {', '.join(wrong)} (a built-in is tier \"official\", source \"core\", verified true)"] \
+        if wrong else []
+
+
 def check_index() -> list[str]:
-    """index.json: the right shape, and each entry pinned to a commit in this branch's history whose files and
-    manifest match it."""
+    """index.json: the right shape, and each community entry pinned to a commit in this branch's history whose files
+    and manifest match it. Official built-ins are checked for shape only."""
     try:
         index = load_index()
     except (OSError, ValueError) as exc:
@@ -97,6 +133,9 @@ def check_index() -> list[str]:
     problems += [f"index.json: {n!r} is listed twice" for n in sorted({n for n in names if names.count(n) > 1})]
     for entry in tools:
         where = f"index.json tool {entry.get('name') if isinstance(entry, dict) else entry!r}"
+        if isinstance(entry, dict) and entry.get("builtin") is True:
+            problems += check_builtin(entry, where)
+            continue
         if not isinstance(entry, dict) or set(entry) != ENTRY_KEYS:
             problems.append(f"{where}: needs exactly {', '.join(sorted(ENTRY_KEYS))}")
             continue
@@ -131,6 +170,20 @@ def check_index() -> list[str]:
             problems.append(f"{where}: sha256 doesn't match {entry['path']} at {commit[:12]} (it is {got}); "
                             f"run `python scripts/library.py pin {name} {commit}`")
     return problems
+
+
+def webcli_reads_index() -> list[str]:
+    """The webcli this Python imports (main, in CI) accepts index.json: the library never publishes an index the CLI
+    refuses."""
+    if importlib.util.find_spec("webcli.core.index_client") is None:
+        return []
+    from webcli.core.index_client import LibraryError, parse
+
+    try:
+        parse(load_index(), "index.json")
+    except (LibraryError, OSError, ValueError) as exc:
+        return [f"webcli can't read index.json: {exc}"]
+    return []
 
 
 def tool_folders() -> list[Path]:
@@ -185,7 +238,7 @@ def check() -> int:
     if shutil.which("webcli") is None:
         print("webcli isn't on PATH: pip install --pre 'truefrontier-webcli>=1.0.0rc1'", file=sys.stderr)
         return 2
-    problems = check_index() + same_hash_as_webcli()
+    problems = check_index() + webcli_reads_index() + same_hash_as_webcli()
     for folder in tool_folders():
         problems += check_tool(folder)
     problems += check_secrets()
@@ -207,6 +260,9 @@ def pin(name: str, commit: str = "HEAD") -> int:
         return 1
     index = load_index()
     old = next((t for t in index["tools"] if t["name"] == name), None)
+    if old and old.get("builtin") is True:
+        print(f"{name} is an official built-in; `python scripts/library.py builtins` writes its entry", file=sys.stderr)
+        return 1
     entry = {"name": name, "version": manifest["version"], "summary": manifest["summary"], "commit": commit,
              "sha256": tree_sha256(commit, path), "path": path, "tier": "community",
              "verified": bool(old and old["verified"] and old["version"] == manifest["version"])}
@@ -216,11 +272,54 @@ def pin(name: str, commit: str = "HEAD") -> int:
     return 0
 
 
+def builtins() -> int:
+    """Rewrite every official built-in's entry from the webcli this Python imports: its official sites whose kind
+    is "data". The llm sites (chatgpt, gemini, muse) are llmcli's, not webcli data sites, so they aren't listed. Run
+    it after each webcli release, from a webcli checkout so the docs links can be checked."""
+    os.environ["WEBCLI_NO_TOOLS"] = "1"  # never import a community tool's code here
+    import webcli
+    from webcli import sites
+
+    sites.reload()
+    version = webcli.__version__
+    docs_dir = Path(webcli.__file__).resolve().parent.parent / "docs"
+    if not docs_dir.is_dir():
+        print(f"warning: {docs_dir} isn't there (not a webcli checkout); the docs links aren't checked",
+              file=sys.stderr)
+    entries = []
+    for name, site in sorted(sites.registry().items()):
+        if sites.tier_of(name) != sites.OFFICIAL or site.kind != "data":
+            continue
+        entry = {"name": name, "version": version, "summary": site.summary, "tier": "official", "builtin": True,
+                 "verified": True, "requires_webcli": f">={version},<{int(version.split('.')[0]) + 1}",
+                 "source": "core", "identity": site.provider, "hosts": list(site.hosts),
+                 "commands": [{"name": verb, "strategy": strategy.value, "writes": verb in site.writes}
+                              for verb, strategy in site.verbs.items()]}
+        if name in DOCS:
+            if docs_dir.is_dir() and not (docs_dir / DOCS[name]).is_file():
+                print(f"{name}: docs/{DOCS[name]} isn't in webcli; fix DOCS", file=sys.stderr)
+                return 1
+            entry["docs"] = WEBCLI_DOCS + DOCS[name]
+        entries.append(entry)
+    index = load_index()
+    community = [t for t in index["tools"] if t.get("builtin") is not True]
+    clash = sorted({t["name"] for t in community} & {e["name"] for e in entries})
+    if clash:
+        print(f"community entries use built-in names: {', '.join(clash)}", file=sys.stderr)
+        return 1
+    index["tools"] = sorted(community + entries, key=lambda t: t["name"])
+    INDEX.write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
+    print(f"wrote {len(entries)} official built-ins from webcli {version}: {', '.join(e['name'] for e in entries)}")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if argv[:1] == ["check"] and len(argv) == 1:
         return check()
     if argv[:1] == ["pin"] and len(argv) in (2, 3):
         return pin(*argv[1:])
+    if argv == ["builtins"]:
+        return builtins()
     print(__doc__.split("\n\n")[1], file=sys.stderr)
     return 2
 
