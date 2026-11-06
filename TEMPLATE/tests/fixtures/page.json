@@ -1,0 +1,7 @@
+{
+  "url": "https://www.example.com/",
+  "title": "Example page",
+  "loginForm": false,
+  "headings": ["Example heading"],
+  "links": [{"text": "Example link", "href": "https://www.example.com/"}]
+}

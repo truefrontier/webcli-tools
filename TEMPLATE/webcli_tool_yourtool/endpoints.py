@@ -1,0 +1,11 @@
+"""www.example.com (webcli yourtool): what the tool touches. HOSTS is the same list as webcli-tool.toml's hosts; the guard
+lets the tool's pages reach these hosts and nothing else, and webcli holds a community tool to them too."""
+
+from __future__ import annotations
+
+APP_URL = "https://www.example.com/"
+HOSTS = ("www.example.com",)
+
+DEFAULT_LIMIT = 50
+MAX_LIMIT = 250  # headings + links fetch.PAGE_JS reads off one page
+RENDER_WAIT_MS = 1500  # after the page's HTML arrives, for scripts to draw the rest

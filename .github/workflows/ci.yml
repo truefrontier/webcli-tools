@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Pull requests from forks run here with a read-only token and no secrets. The checks import each tool's code, so
+# they must stay that way: never switch this to pull_request_target.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # index.json pins commits; the check reads them
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # webcli main until 1.0.0rc1 is on PyPI; then: pip install --pre "truefrontier-webcli>=1.0.0rc1,<2"
+      - name: Install webcli and pytest
+        run: python -m pip install "truefrontier-webcli @ git+https://github.com/truefrontier/webcli@main" pytest
+
+      # index.json, then each tool and TEMPLATE: webcli lint (manifest, read-only default, guard, imports,
+      # secrets), webcli test (offline), pytest; then a secrets scan of the whole repo.
+      - name: Check the library
+        run: python scripts/library.py check

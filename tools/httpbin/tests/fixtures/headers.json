@@ -1,0 +1,8 @@
+{
+  "headers": {
+    "Accept": "application/json",
+    "Accept-Encoding": "identity",
+    "Host": "httpbin.org",
+    "User-Agent": "webcli-tool-httpbin (+https://github.com/truefrontier/webcli-tools)"
+  }
+}
