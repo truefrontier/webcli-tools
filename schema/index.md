@@ -1,6 +1,11 @@
 # index.json
 
-`index.json` is the library's list of tools. `webcli tools` downloads it, installs each tool from the exact commit it names, and checks the files against the hash it names. It also carries the list of revoked tools, which webcli refuses to run.
+`index.json` is the library's list of tools. `webcli tools` downloads it, installs each community tool from the exact commit it names, and checks the files against the hash it names. It also carries the list of revoked tools, which webcli refuses to run.
+
+It lists two kinds of tool:
+
+- **Community tools** live in `tools/<name>/`. Each entry pins the tool to a commit and a hash.
+- **Official built-ins** ship inside webcli, so they don't live here and never install from here. Their entries are a catalog: they let `webcli tools search` and `webcli tools info` show them next to the community tools. `webcli tools install` on one says it's already built in.
 
 Only maintainers change it. A pull request that adds or updates a tool doesn't touch it: after the merge, a maintainer pins the tool (see [CONTRIBUTING.md](../CONTRIBUTING.md#after-the-merge)).
 
@@ -20,6 +25,23 @@ Only maintainers change it. A pull request that adds or updates a tool doesn't t
       "path": "tools/httpbin",
       "tier": "community",
       "verified": false
+    },
+    {
+      "name": "loom",
+      "version": "1.0.0rc1",
+      "summary": "Loom, read-only: list, info, transcript (official transcripts), status (loom-cli parity)",
+      "tier": "official",
+      "builtin": true,
+      "verified": true,
+      "requires_webcli": ">=1.0.0rc1,<2",
+      "source": "core",
+      "identity": "loom",
+      "hosts": [],
+      "commands": [
+        {"name": "list", "strategy": "cookie", "writes": false},
+        {"name": "transcript", "strategy": "intercept", "writes": false}
+      ],
+      "docs": "https://github.com/truefrontier/webcli/blob/main/docs/social-data-sites.md"
     }
   ],
   "revoked": [
@@ -35,10 +57,10 @@ Only maintainers change it. A pull request that adds or updates a tool doesn't t
 |---|---|
 | `repo` | This repository's URL. |
 | `archive` | Where to download a commit: a URL with `{commit}` in it. |
-| `tools` | One entry per tool, each name once. |
+| `tools` | One entry per tool, each name once, sorted by name. |
 | `revoked` | Tools webcli refuses to run. See [Revoking a tool](#revoking-a-tool). |
 
-Each entry in `tools`:
+### A community tool
 
 | Field | Rule |
 |---|---|
@@ -48,10 +70,39 @@ Each entry in `tools`:
 | `commit` | The full 40-character commit the tool installs from. Never a branch or a tag. It must be in `main`'s history. |
 | `sha256` | The hash of the tool's files at `commit` (below). Install fails if the download doesn't match. |
 | `path` | `tools/<name>`. |
-| `tier` | Always `community`. Official tools ship inside webcli, not here. |
+| `tier` | `community`. |
 | `verified` | `false`. Only a maintainer sets it `true`, and none does yet. |
 
 `python scripts/library.py pin <name>` writes an entry, and CI checks every entry on every push.
+
+### An official built-in
+
+`builtin: true` with `tier: "official"` marks one. It has no `commit`, `sha256`, or `path`, because nothing installs from it.
+
+| Field | Rule |
+|---|---|
+| `name` | The site's name in webcli. |
+| `version` | The webcli release that ships it. |
+| `summary` | The site's `summary` in that release. |
+| `tier` | `official`. |
+| `builtin` | `true`. |
+| `verified` | `true`. |
+| `requires_webcli` | The webcli versions that ship it, like `>=1.0.0rc1,<2`. |
+| `source` | `core`. |
+| `identity` | The provider it signs in with (`google`, `loom`), or `none` for a site that never signs in. |
+| `hosts` | The site's declared hosts. Built-ins keep their own host policy in webcli, so today it's `[]`. |
+| `commands` | One `{"name", "strategy", "writes"}` per command. `strategy` is `public`, `cookie`, `intercept`, or `ui`. `writes` is `true` only if the site declares that command as one that writes. |
+| `docs` | Optional. A page in webcli's `docs/` folder about the site. |
+
+Only webcli's **data** sites are listed. Its `llm` sites (`chatgpt`, `gemini`, and `muse`) belong to `llmcli`, not to this library of webcli data sites, so they aren't.
+
+Don't write these entries by hand. From a webcli checkout at the release, run:
+
+```
+python scripts/library.py builtins
+```
+
+It reads every official data site from the webcli it imports and rewrites their entries. It leaves community entries alone, and it refuses if a community entry uses a built-in's name. Run it after each webcli release. CI checks the entries' shape, and that the webcli it installs can read the index.
 
 ## The hash
 

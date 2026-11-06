@@ -17,6 +17,8 @@ webcli httpbin ip
 
 `webcli tools install` downloads the tool from the exact commit in [`index.json`](index.json) and checks its files against the hash there.
 
+`webcli tools search` also lists webcli's official built-ins, like `loom` and `gmail`, marked `builtin`. They're already part of webcli, so `webcli tools install` on one has nothing to do.
+
 ## What webcli holds a community tool to
 
 | Rule | What it means for you |
@@ -59,7 +61,7 @@ webcli submit acmenotes --confirm
 | Path | What it is |
 |---|---|
 | `tools/<name>/` | One tool per folder. The folder's name is the tool's name. |
-| `index.json` | The installable tools, each pinned to a commit and a hash, and the revoked list ([format](schema/index.md)). |
+| `index.json` | The installable tools, each pinned to a commit and a hash; a catalog of webcli's official built-ins; and the revoked list ([format](schema/index.md)). |
 | `TEMPLATE/` | What `webcli new` makes: a read-only tool that reads one page in your signed-in browser. |
 | `schema/` | The manifest rules ([webcli-tool-manifest.md](schema/webcli-tool-manifest.md), a copy of webcli's) and the index format ([index.md](schema/index.md)). |
 | `scripts/library.py` | The checks CI runs, and how maintainers pin a tool. |
