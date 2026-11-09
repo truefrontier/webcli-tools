@@ -335,3 +335,49 @@ def test_check_secrets_finds_a_token_outside_the_tool_folders(repo):
     token = "gh" + "p_" + "a1" * 18  # put together here, so this file doesn't hold one
     repo.write("docs/notes.md", f"Release with {token}\n")
     assert library.check_secrets() == ["docs/notes.md:1: looks like a GitHub token"]
+
+
+# --- builtins and webcli_reads_index, with the webcli CI installs ---------------------------------------------
+
+@pytest.fixture
+def webcli_sites(monkeypatch):
+    sites = pytest.importorskip("webcli.sites")
+    monkeypatch.setenv("WEBCLI_NO_TOOLS", "1")  # builtins() sets it too; this puts it back afterwards
+    return sites
+
+
+def test_builtins_writes_entries_check_and_webcli_accept(repo, webcli_sites):
+    repo.tool("acme")
+    library.pin("acme")
+    assert library.builtins() == 0
+    entries = {t["name"]: t for t in repo.index()["tools"]}
+    official = {name for name, site in webcli_sites.registry().items()
+                if webcli_sites.tier_of(name) == webcli_sites.OFFICIAL and site.kind == "data"}
+    assert set(entries) == official | {"acme"}
+    assert entries["acme"]["tier"] == "community"  # left alone
+    assert library.check_index() == []
+    assert library.webcli_reads_index() == []
+
+
+def test_builtins_refuses_a_community_entry_with_a_builtin_name(repo, webcli_sites):
+    repo.add_to_index({"name": "gmail", "tier": "community"})
+    before = repo.index()
+    assert library.builtins() == 1
+    assert repo.index() == before
+
+
+def test_webcli_reads_what_pin_writes(repo):
+    pytest.importorskip("webcli.core.index_client")
+    repo.tool("acme")
+    library.pin("acme")
+    assert library.webcli_reads_index() == []
+
+
+def test_webcli_reads_index_reports_an_index_webcli_refuses(repo):
+    pytest.importorskip("webcli.core.index_client")
+    index = repo.index()
+    del index["revoked"]
+    repo.write("index.json", json.dumps(index))
+    problems = library.webcli_reads_index()
+    assert len(problems) == 1 and problems[0].startswith(
+        "webcli can't read index.json: index.json is not a valid webcli-tools index: it needs a \"revoked\" list")
