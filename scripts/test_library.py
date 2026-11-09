@@ -81,6 +81,14 @@ class Repo:
     def entry(self, name: str) -> dict:
         return next(t for t in self.index()["tools"] if t["name"] == name)
 
+    def add_pinned(self, name: str) -> None:
+        """Commit tools/<name> and list it as pinned at that commit, written by hand as an edited index.json would
+        be, past pin's own checks."""
+        commit = self.tool(name)
+        self.add_to_index({"name": name, "version": "0.1.0", "summary": f"Notes from {name}.", "commit": commit,
+                           "sha256": library.tree_sha256(commit, f"tools/{name}"), "path": f"tools/{name}",
+                           "tier": "community", "verified": False})
+
     def add_to_index(self, entry: dict) -> None:
         index = self.index()
         index["tools"].append(entry)
@@ -218,7 +226,7 @@ def test_check_index_catches_a_hash_that_doesnt_match(repo):
     library.pin("acme")
     repo.set_in_index("acme", sha256="0" * 64)
     assert library.check_index() == [
-        f"index.json tool 'acme': sha256 doesn't match tools/acme at {commit[:12]} (it is {ACME_SHA256}); "
+        f"index.json tool acme: sha256 doesn't match tools/acme at {commit[:12]} (it is {ACME_SHA256}); "
         f"run `python scripts/library.py pin acme {commit}`"]
 
 
@@ -226,33 +234,30 @@ def test_check_index_catches_a_commit_outside_this_branch(repo):
     repo.tool("acme")
     library.pin("acme")
     repo.set_in_index("acme", commit="0" * 40)
-    assert library.check_index() == ["index.json tool 'acme': commit 000000000000 isn't in this branch's history"]
+    assert library.check_index() == ["index.json tool acme: commit 000000000000 isn't in this branch's history"]
 
 
 # --- check_index refuses the names webcli reserves ------------------------------------------------------------
 
 def refused(name: str) -> str:
-    return (f"index.json tool {name!r}: webcli won't load a tool by this name: it's one of webcli's commands, a "
+    return (f"index.json tool {name}: webcli won't load a tool by this name: it's one of webcli's commands, a "
             "built-in site, or the provider a built-in signs in as")
 
 
 @pytest.mark.parametrize("name", ["feed", "tools", "none"])
 def test_check_index_refuses_a_webcli_command(repo, name):
-    repo.tool(name)
-    library.pin(name)
+    repo.add_pinned(name)
     assert library.check_index() == [refused(name)]
 
 
 @pytest.mark.parametrize("name", ["feed", "tools", "none"])
 def test_check_index_refuses_a_webcli_command_without_webcli(repo, no_webcli, name):
-    repo.tool(name)
-    library.pin(name)
+    repo.add_pinned(name)
     assert library.check_index() == [refused(name)]
 
 
 def test_check_index_refuses_the_provider_a_listed_builtin_signs_in_as(repo, no_webcli):
-    repo.tool("acme")
-    library.pin("acme")
+    repo.add_pinned("acme")
     repo.add_to_index(BUILTIN)  # acmemail signs in as "acme"
     assert library.check_index() == [refused("acme")]
 
@@ -261,9 +266,27 @@ def test_check_index_refuses_the_provider_a_listed_builtin_signs_in_as(repo, no_
 def test_check_index_refuses_builtins_and_providers_only_webcli_knows(repo, name):
     # muse (provider "meta") and walkie aren't data sites, so index.json doesn't list them.
     pytest.importorskip("webcli.sites")
-    repo.tool(name)
-    library.pin(name)
+    repo.add_pinned(name)
     assert library.check_index() == [refused(name)]
+
+
+@pytest.mark.parametrize("name", ["feed", "none"])
+def test_pin_refuses_a_name_webcli_keeps(repo, name):
+    repo.tool(name)
+    assert library.pin(name) == 1
+    assert repo.index()["tools"] == []
+
+
+def test_pin_refuses_a_name_webcli_keeps_without_webcli(repo, no_webcli):
+    repo.tool("tools")
+    assert library.pin("tools") == 1
+    assert repo.index()["tools"] == []
+
+
+def test_a_non_object_entry_is_named_as_written(repo):
+    repo.add_to_index("acme")
+    assert library.check_index() == ["index.json tool 'acme': needs exactly commit, name, path, sha256, summary, "
+                                     "tier, verified, version"]
 
 
 def test_the_copied_core_commands_match_webcli():
