@@ -73,7 +73,7 @@ Only maintainers change it. A pull request that adds or updates a tool doesn't t
 | `tier` | `community`. |
 | `verified` | `false`. Only a maintainer sets it `true`, and none does yet. A re-pin keeps `true` only when `sha256` is unchanged. |
 
-`python scripts/library.py pin <name>` writes an entry, and CI checks every entry on every push.
+`python scripts/library.py pin <name>` writes an entry. It refuses a name webcli keeps for itself (see `name`). CI checks every entry on every push.
 
 ### An official built-in
 

@@ -81,6 +81,14 @@ class Repo:
     def entry(self, name: str) -> dict:
         return next(t for t in self.index()["tools"] if t["name"] == name)
 
+    def add_pinned(self, name: str) -> None:
+        """Commit tools/<name> and list it as pinned at that commit, written by hand as an edited index.json would
+        be, past pin's own checks."""
+        commit = self.tool(name)
+        self.add_to_index({"name": name, "version": "0.1.0", "summary": f"Notes from {name}.", "commit": commit,
+                           "sha256": library.tree_sha256(commit, f"tools/{name}"), "path": f"tools/{name}",
+                           "tier": "community", "verified": False})
+
     def add_to_index(self, entry: dict) -> None:
         index = self.index()
         index["tools"].append(entry)
@@ -218,7 +226,7 @@ def test_check_index_catches_a_hash_that_doesnt_match(repo):
     library.pin("acme")
     repo.set_in_index("acme", sha256="0" * 64)
     assert library.check_index() == [
-        f"index.json tool 'acme': sha256 doesn't match tools/acme at {commit[:12]} (it is {ACME_SHA256}); "
+        f"index.json tool acme: sha256 doesn't match tools/acme at {commit[:12]} (it is {ACME_SHA256}); "
         f"run `python scripts/library.py pin acme {commit}`"]
 
 
@@ -226,33 +234,30 @@ def test_check_index_catches_a_commit_outside_this_branch(repo):
     repo.tool("acme")
     library.pin("acme")
     repo.set_in_index("acme", commit="0" * 40)
-    assert library.check_index() == ["index.json tool 'acme': commit 000000000000 isn't in this branch's history"]
+    assert library.check_index() == ["index.json tool acme: commit 000000000000 isn't in this branch's history"]
 
 
 # --- check_index refuses the names webcli reserves ------------------------------------------------------------
 
 def refused(name: str) -> str:
-    return (f"index.json tool {name!r}: webcli won't load a tool by this name: it's one of webcli's commands, a "
+    return (f"index.json tool {name}: webcli won't load a tool by this name: it's one of webcli's commands, a "
             "built-in site, or the provider a built-in signs in as")
 
 
 @pytest.mark.parametrize("name", ["feed", "tools", "none"])
 def test_check_index_refuses_a_webcli_command(repo, name):
-    repo.tool(name)
-    library.pin(name)
+    repo.add_pinned(name)
     assert library.check_index() == [refused(name)]
 
 
 @pytest.mark.parametrize("name", ["feed", "tools", "none"])
 def test_check_index_refuses_a_webcli_command_without_webcli(repo, no_webcli, name):
-    repo.tool(name)
-    library.pin(name)
+    repo.add_pinned(name)
     assert library.check_index() == [refused(name)]
 
 
 def test_check_index_refuses_the_provider_a_listed_builtin_signs_in_as(repo, no_webcli):
-    repo.tool("acme")
-    library.pin("acme")
+    repo.add_pinned("acme")
     repo.add_to_index(BUILTIN)  # acmemail signs in as "acme"
     assert library.check_index() == [refused("acme")]
 
@@ -261,9 +266,27 @@ def test_check_index_refuses_the_provider_a_listed_builtin_signs_in_as(repo, no_
 def test_check_index_refuses_builtins_and_providers_only_webcli_knows(repo, name):
     # muse (provider "meta") and walkie aren't data sites, so index.json doesn't list them.
     pytest.importorskip("webcli.sites")
-    repo.tool(name)
-    library.pin(name)
+    repo.add_pinned(name)
     assert library.check_index() == [refused(name)]
+
+
+@pytest.mark.parametrize("name", ["feed", "none"])
+def test_pin_refuses_a_name_webcli_keeps(repo, name):
+    repo.tool(name)
+    assert library.pin(name) == 1
+    assert repo.index()["tools"] == []
+
+
+def test_pin_refuses_a_name_webcli_keeps_without_webcli(repo, no_webcli):
+    repo.tool("tools")
+    assert library.pin("tools") == 1
+    assert repo.index()["tools"] == []
+
+
+def test_a_non_object_entry_is_named_as_written(repo):
+    repo.add_to_index("acme")
+    assert library.check_index() == ["index.json tool 'acme': needs exactly commit, name, path, sha256, summary, "
+                                     "tier, verified, version"]
 
 
 def test_the_copied_core_commands_match_webcli():
@@ -335,3 +358,78 @@ def test_check_secrets_finds_a_token_outside_the_tool_folders(repo):
     token = "gh" + "p_" + "a1" * 18  # put together here, so this file doesn't hold one
     repo.write("docs/notes.md", f"Release with {token}\n")
     assert library.check_secrets() == ["docs/notes.md:1: looks like a GitHub token"]
+
+
+# --- builtins and webcli_reads_index, with the webcli CI installs ---------------------------------------------
+
+@pytest.fixture
+def webcli_sites(monkeypatch):
+    sites = pytest.importorskip("webcli.sites")
+    monkeypatch.setenv("WEBCLI_NO_TOOLS", "1")  # builtins() sets it too; this puts it back afterwards
+    return sites
+
+
+def test_builtins_writes_entries_check_and_webcli_accept(repo, webcli_sites):
+    repo.tool("acme")
+    library.pin("acme")
+    assert library.builtins() == 0
+    entries = {t["name"]: t for t in repo.index()["tools"]}
+    official = {name for name, site in webcli_sites.registry().items()
+                if webcli_sites.tier_of(name) == webcli_sites.OFFICIAL and site.kind == "data"}
+    assert set(entries) == official | {"acme"}
+    assert entries["acme"]["tier"] == "community"  # left alone
+    assert library.check_index() == []
+    assert library.webcli_reads_index() == []
+
+
+def test_builtins_refuses_a_community_entry_with_a_builtin_name(repo, webcli_sites):
+    repo.add_to_index({"name": "gmail", "tier": "community"})
+    before = repo.index()
+    assert library.builtins() == 1
+    assert repo.index() == before
+
+
+def test_webcli_reads_what_pin_writes(repo):
+    pytest.importorskip("webcli.core.index_client")
+    repo.tool("acme")
+    library.pin("acme")
+    assert library.webcli_reads_index() == []
+
+
+def test_webcli_reads_index_reports_an_index_webcli_refuses(repo):
+    pytest.importorskip("webcli.core.index_client")
+    index = repo.index()
+    del index["revoked"]
+    repo.write("index.json", json.dumps(index))
+    problems = library.webcli_reads_index()
+    assert len(problems) == 1 and problems[0].startswith(
+        "webcli can't read index.json: index.json is not a valid webcli-tools index: it needs a \"revoked\" list")
+
+
+def test_same_hash_as_webcli_agrees_on_a_committed_tool(repo, monkeypatch):
+    pytest.importorskip("webcli.core.index_client")
+    monkeypatch.setenv("CI", "1")
+    repo.tool("acme")
+    assert library.same_hash_as_webcli() == []
+
+
+def test_same_hash_as_webcli_flags_a_folder_that_differs_from_head(repo, monkeypatch):
+    pytest.importorskip("webcli.core.index_client")
+    monkeypatch.setenv("CI", "1")
+    repo.tool("acme")
+    repo.write("tools/acme/webcli_tool_acme/__init__.py", "ADAPTER = 'changed'\n")  # webcli hashes the folder
+    assert library.same_hash_as_webcli() == [
+        "tools/acme: webcli's tree_sha256 disagrees with scripts/library.py's; fix the script"]
+
+
+def test_same_hash_as_webcli_runs_only_in_ci(repo, monkeypatch):
+    monkeypatch.delenv("CI", raising=False)
+    repo.tool("acme")
+    repo.write("tools/acme/webcli_tool_acme/__init__.py", "ADAPTER = 'changed'\n")
+    assert library.same_hash_as_webcli() == []
+
+
+@pytest.mark.parametrize("argv", [[], ["check", "extra"], ["pin"], ["pin", "a", "b", "c"], ["builtins", "x"], ["nope"]])
+def test_main_prints_usage_for_anything_else(argv, capsys):
+    assert library.main(argv) == 2
+    assert "python scripts/library.py check" in capsys.readouterr().err

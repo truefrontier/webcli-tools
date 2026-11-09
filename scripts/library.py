@@ -155,7 +155,7 @@ def check_index() -> list[str]:
     problems += [f"index.json: {n!r} is listed twice" for n in sorted({n for n in names if names.count(n) > 1})]
     reserved = reserved_names(tools)
     for entry in tools:
-        where = f"index.json tool {entry.get('name') if isinstance(entry, dict) else entry!r}"
+        where = f"index.json tool {entry.get('name')}" if isinstance(entry, dict) else f"index.json tool {entry!r}"
         if isinstance(entry, dict) and entry.get("builtin") is True:
             problems += check_builtin(entry, where)
             continue
@@ -300,6 +300,10 @@ def pin(name: str, commit: str = "HEAD") -> int:
     old = next((t for t in index["tools"] if t["name"] == name), None)
     if old and old.get("builtin") is True:
         print(f"{name} is an official built-in; `python scripts/library.py builtins` writes its entry", file=sys.stderr)
+        return 1
+    if name in reserved_names(index["tools"]):
+        print(f"webcli won't load a tool named {name!r}: it's one of webcli's commands, a built-in site, or the "
+              "provider a built-in signs in as", file=sys.stderr)
         return 1
     entry = {"name": name, "version": manifest["version"], "summary": manifest["summary"], "commit": commit,
              "sha256": tree_sha256(commit, path), "path": path, "tier": "community"}
