@@ -99,6 +99,13 @@ def repo(tmp_path, monkeypatch) -> Repo:
     return Repo(tmp_path / "repo")
 
 
+@pytest.fixture
+def no_webcli(monkeypatch) -> None:
+    """Make `import webcli` fail, as it does on a machine without webcli."""
+    for module in [m for m in sys.modules if m.startswith("webcli.")] + ["webcli"]:
+        monkeypatch.setitem(sys.modules, module, None)
+
+
 # A well-formed official built-in's catalog entry.
 BUILTIN = {"name": "acmemail", "version": "1.0.0", "summary": "Acme Mail.", "tier": "official", "builtin": True,
            "verified": True, "requires_webcli": ">=1.0.0,<2", "source": "core", "identity": "acme",
@@ -220,6 +227,48 @@ def test_check_index_catches_a_commit_outside_this_branch(repo):
     library.pin("acme")
     repo.set_in_index("acme", commit="0" * 40)
     assert library.check_index() == ["index.json tool 'acme': commit 000000000000 isn't in this branch's history"]
+
+
+# --- check_index refuses the names webcli reserves ------------------------------------------------------------
+
+def refused(name: str) -> str:
+    return (f"index.json tool {name!r}: webcli won't load a tool by this name: it's one of webcli's commands, a "
+            "built-in site, or the provider a built-in signs in as")
+
+
+@pytest.mark.parametrize("name", ["feed", "tools", "none"])
+def test_check_index_refuses_a_webcli_command(repo, name):
+    repo.tool(name)
+    library.pin(name)
+    assert library.check_index() == [refused(name)]
+
+
+@pytest.mark.parametrize("name", ["feed", "tools", "none"])
+def test_check_index_refuses_a_webcli_command_without_webcli(repo, no_webcli, name):
+    repo.tool(name)
+    library.pin(name)
+    assert library.check_index() == [refused(name)]
+
+
+def test_check_index_refuses_the_provider_a_listed_builtin_signs_in_as(repo, no_webcli):
+    repo.tool("acme")
+    library.pin("acme")
+    repo.add_to_index(BUILTIN)  # acmemail signs in as "acme"
+    assert library.check_index() == [refused("acme")]
+
+
+@pytest.mark.parametrize("name", ["muse", "meta", "walkie"])
+def test_check_index_refuses_builtins_and_providers_only_webcli_knows(repo, name):
+    # muse (provider "meta") and walkie aren't data sites, so index.json doesn't list them.
+    pytest.importorskip("webcli.sites")
+    repo.tool(name)
+    library.pin(name)
+    assert library.check_index() == [refused(name)]
+
+
+def test_the_copied_core_commands_match_webcli():
+    manifest_schema = pytest.importorskip("webcli.core.manifest_schema")
+    assert library.CORE_COMMANDS == manifest_schema.CORE_COMMANDS
 
 
 # --- check_tool, with a stand-in webcli -----------------------------------------------------------------------
