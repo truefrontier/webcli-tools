@@ -71,7 +71,7 @@ Only maintainers change it. A pull request that adds or updates a tool doesn't t
 | `sha256` | The hash of the tool's files at `commit` (below). Install fails if the download doesn't match. |
 | `path` | `tools/<name>`. |
 | `tier` | `community`. |
-| `verified` | `false`. Only a maintainer sets it `true`, and none does yet. |
+| `verified` | `false`. Only a maintainer sets it `true`, and none does yet. A re-pin keeps `true` only when `sha256` is unchanged. |
 
 `python scripts/library.py pin <name>` writes an entry, and CI checks every entry on every push.
 
