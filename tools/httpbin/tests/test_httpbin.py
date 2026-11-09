@@ -18,15 +18,18 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 class FakeOpener:
-    """Answers each path from tests/fixtures/<path>.json, or with `error`; records every URL asked for."""
+    """Answers each path from tests/fixtures/<path>.json, or with `body`, or with `error`; records every URL asked
+    for."""
 
-    def __init__(self, error: Exception | None = None) -> None:
-        self.urls, self.error = [], error
+    def __init__(self, error: Exception | None = None, body: bytes | None = None) -> None:
+        self.urls, self.error, self.body = [], error, body
 
     def open(self, request, timeout):
         self.urls.append(request.full_url)
         if self.error:
             raise self.error
+        if self.body is not None:
+            return io.BytesIO(self.body)
         return io.BytesIO((FIXTURES / f"{request.full_url.rsplit('/', 1)[1]}.json").read_bytes())
 
 
@@ -67,6 +70,19 @@ def test_errors_become_api_errors():
                 pass
             else:
                 raise AssertionError(f"{error!r} didn't become an APIError")
+
+
+def test_an_answer_over_max_bytes_is_too_large():
+    answer = b'{"origin": "203.0.113.7"}'
+    with answering(FakeOpener(body=answer.ljust(api.MAX_BYTES))):  # JSON allows the trailing spaces
+        assert api.ip() == {"ip": "203.0.113.7"}
+    with answering(FakeOpener(body=answer.ljust(api.MAX_BYTES + 1))):
+        try:
+            api.ip()
+        except api.APIError as exc:
+            assert "too large" in str(exc), exc
+        else:
+            raise AssertionError("an answer over MAX_BYTES didn't become an APIError")
 
 
 def test_only_https_gets_to_httpbin_are_allowed():
