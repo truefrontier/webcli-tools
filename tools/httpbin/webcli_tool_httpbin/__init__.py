@@ -27,6 +27,6 @@ ADAPTER = Site(
     verbs={"ip": Strategy.PUBLIC, "headers": Strategy.PUBLIC, "uuid": Strategy.PUBLIC},
     status_op=None,
     adapter_api=1,
-    version="0.1.0",
+    version="0.1.1",
     hosts=HOSTS,
 )

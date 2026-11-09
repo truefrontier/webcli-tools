@@ -5,7 +5,7 @@
     python scripts/library.py builtins            # rewrite the official built-ins' entries from this webcli
 
 It needs git, and webcli 1.0 or later (`webcli lint` and `webcli test`) on PATH and importable. `check` also runs
-pytest in each tool's folder when pytest is installed.
+pytest in each tool's folder, and on scripts/ (this script's own tests), when pytest is installed.
 
 The sha256 an index entry pins is the one `webcli tools install` checks (tree_sha256 in webcli's
 webcli/core/index_client.py): sha256 over "<path>\\0<sha256 of the file's bytes>\\n" for each file in the tool's
@@ -241,6 +241,11 @@ def check() -> int:
     problems = check_index() + webcli_reads_index() + same_hash_as_webcli()
     for folder in tool_folders():
         problems += check_tool(folder)
+    if importlib.util.find_spec("pytest") is not None:
+        print("== scripts: library.py's own tests", flush=True)
+        if subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "scripts"],
+                          cwd=ROOT).returncode:
+            problems.append("scripts: pytest failed (its output is above)")
     problems += check_secrets()
     if problems:
         print(f"\n{len(problems)} problem(s):", file=sys.stderr)
@@ -249,6 +254,12 @@ def check() -> int:
         return 1
     print(f"\nok: index.json, {len(tool_folders())} tool folders, secrets")
     return 0
+
+
+def keeps_verified(old: dict | None, new: dict) -> bool:
+    """A re-pin stays verified only when its files are the ones a maintainer verified: the same sha256. A new version
+    always changes the sha256 (webcli-tool.toml is one of the files), so it starts unverified."""
+    return bool(old and old["verified"] and old["sha256"] == new["sha256"])
 
 
 def pin(name: str, commit: str = "HEAD") -> int:
@@ -264,8 +275,8 @@ def pin(name: str, commit: str = "HEAD") -> int:
         print(f"{name} is an official built-in; `python scripts/library.py builtins` writes its entry", file=sys.stderr)
         return 1
     entry = {"name": name, "version": manifest["version"], "summary": manifest["summary"], "commit": commit,
-             "sha256": tree_sha256(commit, path), "path": path, "tier": "community",
-             "verified": bool(old and old["verified"] and old["version"] == manifest["version"])}
+             "sha256": tree_sha256(commit, path), "path": path, "tier": "community"}
+    entry["verified"] = keeps_verified(old, entry)
     index["tools"] = sorted([t for t in index["tools"] if t["name"] != name] + [entry], key=lambda t: t["name"])
     INDEX.write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
     print(f"pinned {name} {entry['version']} at {commit[:12]} (sha256 {entry['sha256'][:16]}...)")

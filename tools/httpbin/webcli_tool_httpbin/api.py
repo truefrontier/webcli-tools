@@ -51,7 +51,10 @@ def get(path: str) -> Any:
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
     try:
         with _opener.open(request, timeout=TIMEOUT) as response:
-            return json.loads(response.read(MAX_BYTES))
+            body = response.read(MAX_BYTES + 1)  # one byte more, to tell a full answer from a cut-off one
+        if len(body) > MAX_BYTES:
+            raise APIError(f"httpbin.org's answer for {path} is too large (over {MAX_BYTES:,} bytes).")
+        return json.loads(body)
     except urllib.error.HTTPError as exc:
         raise APIError(f"httpbin.org answered HTTP {exc.code} for {path}.") from None
     except (urllib.error.URLError, OSError, ValueError) as exc:
