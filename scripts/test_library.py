@@ -404,3 +404,32 @@ def test_webcli_reads_index_reports_an_index_webcli_refuses(repo):
     problems = library.webcli_reads_index()
     assert len(problems) == 1 and problems[0].startswith(
         "webcli can't read index.json: index.json is not a valid webcli-tools index: it needs a \"revoked\" list")
+
+
+def test_same_hash_as_webcli_agrees_on_a_committed_tool(repo, monkeypatch):
+    pytest.importorskip("webcli.core.index_client")
+    monkeypatch.setenv("CI", "1")
+    repo.tool("acme")
+    assert library.same_hash_as_webcli() == []
+
+
+def test_same_hash_as_webcli_flags_a_folder_that_differs_from_head(repo, monkeypatch):
+    pytest.importorskip("webcli.core.index_client")
+    monkeypatch.setenv("CI", "1")
+    repo.tool("acme")
+    repo.write("tools/acme/webcli_tool_acme/__init__.py", "ADAPTER = 'changed'\n")  # webcli hashes the folder
+    assert library.same_hash_as_webcli() == [
+        "tools/acme: webcli's tree_sha256 disagrees with scripts/library.py's; fix the script"]
+
+
+def test_same_hash_as_webcli_runs_only_in_ci(repo, monkeypatch):
+    monkeypatch.delenv("CI", raising=False)
+    repo.tool("acme")
+    repo.write("tools/acme/webcli_tool_acme/__init__.py", "ADAPTER = 'changed'\n")
+    assert library.same_hash_as_webcli() == []
+
+
+@pytest.mark.parametrize("argv", [[], ["check", "extra"], ["pin"], ["pin", "a", "b", "c"], ["builtins", "x"], ["nope"]])
+def test_main_prints_usage_for_anything_else(argv, capsys):
+    assert library.main(argv) == 2
+    assert "python scripts/library.py check" in capsys.readouterr().err
