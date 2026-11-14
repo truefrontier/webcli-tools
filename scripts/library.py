@@ -1,6 +1,7 @@
 """The library's own checks, and pinning a tool in index.json.
 
-    python scripts/library.py check               # what CI runs: index.json, every tool and TEMPLATE, secrets
+    python scripts/library.py check               # what CI runs: index.json, every tool and TEMPLATE, secrets,
+                                                  # tracked compiled files
     python scripts/library.py pin NAME [COMMIT]   # point NAME's index.json entry at COMMIT (default HEAD)
     python scripts/library.py builtins            # rewrite the official built-ins' entries from this webcli
 
@@ -253,6 +254,19 @@ def check_tool(folder: Path) -> list[str]:
     return problems
 
 
+COMPILED = (".pyc", ".pyo", ".pyd", ".so")
+
+
+def tracked_compiled() -> list[str]:
+    """Tracked compiled Python, anywhere in the repo: a __pycache__/ folder, or a .pyc, .pyo, .pyd or .so file.
+    Reviewers read source, but Python can run a cached or compiled file instead (an unchecked-hash .pyc wins over the
+    .py beside it), and the pinned sha256 covers whatever is committed. `webcli lint` can't tell a committed cache
+    from Python's own, so this reads git's list of tracked files, not the disk."""
+    return [f"{path}: compiled Python is tracked; reviewers can't read it, so remove it (git rm --cached)"
+            for path in git("ls-files", "-z").split("\0")
+            if path and ("__pycache__" in path.split("/") or path.lower().endswith(COMPILED))]
+
+
 def check_secrets() -> list[str]:
     """Every file in the repo, with the secret patterns `webcli lint` uses (it already scanned the tool folders,
     fixtures included, more strictly)."""
@@ -265,7 +279,7 @@ def check() -> int:
     if shutil.which("webcli") is None:
         print("webcli isn't on PATH: pip install --pre 'truefrontier-webcli>=1.0.0rc1'", file=sys.stderr)
         return 2
-    problems = check_index() + webcli_reads_index() + same_hash_as_webcli()
+    problems = check_index() + webcli_reads_index() + same_hash_as_webcli() + tracked_compiled()
     for folder in tool_folders():
         problems += check_tool(folder)
     if importlib.util.find_spec("pytest") is not None:

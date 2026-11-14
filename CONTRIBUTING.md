@@ -38,6 +38,7 @@ CI checks every rule it can. Reviewers check the rest.
 | Fixtures (`tests/fixtures/`) hold no one's personal details: no real names, email addresses, phone numbers, messages, or account IDs. Replace them with made-up ones. | CI catches tokens and emails; reviewers read every fixture |
 | `maintainers` lists your GitHub login, and you'll fix the tool when the site changes. | Reviewers |
 | No code that hides what it does: no downloading and running code, no obfuscation, no reaching outside the tool's hosts by other means. | Reviewers |
+| Source only: no compiled Python (`__pycache__/`, `.pyc`, `.pyo`, `.pyd`, `.so`) anywhere in the repo. Reviewers read the source, and Python can run a compiled file in its place. | CI |
 
 ## Send it
 
