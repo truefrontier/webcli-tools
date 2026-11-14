@@ -42,6 +42,10 @@ ENTRY_KEYS = {"name", "version", "summary", "commit", "sha256", "path", "tier", 
 BUILTIN_KEYS = {"name", "version", "summary", "tier", "builtin", "verified", "requires_webcli", "source", "identity",
                 "hosts", "commands"}  # and optionally "docs"
 STRATEGIES = {"public", "cookie", "intercept", "ui"}
+# webcli's top-level commands, copied from CORE_COMMANDS in webcli/core/manifest_schema.py (webcli 1.0.0rc2), for
+# reserved_names() when webcli isn't importable. A test fails when webcli's list changes.
+CORE_COMMANDS = frozenset({"sites", "feed", "identity", "doctor", "serve", "agent-help",
+                           "new", "dev", "test", "lint", "tools", "submit"})
 WEBCLI_DOCS = "https://github.com/truefrontier/webcli/blob/main/docs/"
 # The best doc in webcli's docs/ for each built-in; one without a doc gets no "docs" key.
 DOCS = {"amazon": "amazon-site.md", "gsc": "gsc-site.md", "messages": "messages-site.md",
@@ -108,6 +112,24 @@ def check_builtin(entry: dict, where: str) -> list[str]:
         if wrong else []
 
 
+def reserved_names(tools: list) -> set[str]:
+    """The names webcli won't load a tool by (webcli/sites/__init__.py skips it, and `webcli tools install` refuses
+    it): its commands, its built-in sites, the providers they sign in as, and "none". Read from the webcli this Python
+    imports; without one, CORE_COMMANDS plus the built-ins in index.json `tools`."""
+    builtins = [t for t in tools if isinstance(t, dict) and t.get("builtin") is True]
+    listed = {t.get("name") for t in builtins} | {t.get("identity") for t in builtins}
+    try:
+        from webcli.core.manifest_schema import CORE_COMMANDS as commands
+        from webcli.sites import BUILTIN
+        from webcli.sites.base import NO_IDENTITY
+    except ImportError:
+        return listed | CORE_COMMANDS | {"none"}
+    # The official sites only, as webcli loads them ("module:ATTR"); never a community tool's code.
+    official = [getattr(importlib.import_module(module), attr)
+                for module, _, attr in (target.partition(":") for target in BUILTIN.values())]
+    return listed | commands | set(BUILTIN) | {site.provider for site in official} | {NO_IDENTITY}
+
+
 def check_index() -> list[str]:
     """index.json: the right shape, and each community entry pinned to a commit in this branch's history whose files
     and manifest match it. Official built-ins are checked for shape only."""
@@ -131,6 +153,7 @@ def check_index() -> list[str]:
             problems.append(f'index.json revoked: {item!r} must be a name or {{"name", "versions", "reason"}}')
     names = [t.get("name") for t in tools if isinstance(t, dict)]
     problems += [f"index.json: {n!r} is listed twice" for n in sorted({n for n in names if names.count(n) > 1})]
+    reserved = reserved_names(tools)
     for entry in tools:
         where = f"index.json tool {entry.get('name') if isinstance(entry, dict) else entry!r}"
         if isinstance(entry, dict) and entry.get("builtin") is True:
@@ -151,6 +174,10 @@ def check_index() -> list[str]:
         wrong = [key for key, ok in shape.items() if not ok]
         if wrong:
             problems.append(f"{where}: bad {', '.join(wrong)} (path is tools/<name>, tier is \"community\")")
+            continue
+        if name in reserved:
+            problems.append(f"{where}: webcli won't load a tool by this name: it's one of webcli's commands, a "
+                            "built-in site, or the provider a built-in signs in as")
             continue
         if subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", commit, "HEAD"],
                           capture_output=True).returncode != 0:
