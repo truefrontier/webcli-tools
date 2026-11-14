@@ -64,16 +64,16 @@ Only maintainers change it. A pull request that adds or updates a tool doesn't t
 
 | Field | Rule |
 |---|---|
-| `name` | The tool's name, as in its manifest. |
+| `name` | The tool's name, as in its manifest. Not a name webcli keeps for itself: one of its commands, a built-in site, or the provider a built-in signs in as (`feed`, `gmail`, `google`, `none`). webcli won't load a tool by such a name. |
 | `version` | The manifest's `version` at `commit`. |
 | `summary` | The manifest's `summary` at `commit`. `webcli tools search` shows it. |
 | `commit` | The full 40-character commit the tool installs from. Never a branch or a tag. It must be in `main`'s history. |
 | `sha256` | The hash of the tool's files at `commit` (below). Install fails if the download doesn't match. |
 | `path` | `tools/<name>`. |
 | `tier` | `community`. |
-| `verified` | `false`. Only a maintainer sets it `true`, and none does yet. |
+| `verified` | `false`. Only a maintainer sets it `true`, and none does yet. A re-pin keeps `true` only when `sha256` is unchanged. |
 
-`python scripts/library.py pin <name>` writes an entry, and CI checks every entry on every push.
+`python scripts/library.py pin <name>` writes an entry. It refuses a name webcli keeps for itself (see `name`). CI checks every entry on every push.
 
 ### An official built-in
 

@@ -1,11 +1,12 @@
 """The library's own checks, and pinning a tool in index.json.
 
-    python scripts/library.py check               # what CI runs: index.json, every tool and TEMPLATE, secrets
+    python scripts/library.py check               # what CI runs: index.json, every tool and TEMPLATE, secrets,
+                                                  # tracked compiled files
     python scripts/library.py pin NAME [COMMIT]   # point NAME's index.json entry at COMMIT (default HEAD)
     python scripts/library.py builtins            # rewrite the official built-ins' entries from this webcli
 
 It needs git, and webcli 1.0 or later (`webcli lint` and `webcli test`) on PATH and importable. `check` also runs
-pytest in each tool's folder when pytest is installed.
+pytest in each tool's folder, and on scripts/ (this script's own tests), when pytest is installed.
 
 The sha256 an index entry pins is the one `webcli tools install` checks (tree_sha256 in webcli's
 webcli/core/index_client.py): sha256 over "<path>\\0<sha256 of the file's bytes>\\n" for each file in the tool's
@@ -42,6 +43,10 @@ ENTRY_KEYS = {"name", "version", "summary", "commit", "sha256", "path", "tier", 
 BUILTIN_KEYS = {"name", "version", "summary", "tier", "builtin", "verified", "requires_webcli", "source", "identity",
                 "hosts", "commands"}  # and optionally "docs"
 STRATEGIES = {"public", "cookie", "intercept", "ui"}
+# webcli's top-level commands, copied from CORE_COMMANDS in webcli/core/manifest_schema.py (webcli 1.0.0rc2), for
+# reserved_names() when webcli isn't importable. A test fails when webcli's list changes.
+CORE_COMMANDS = frozenset({"sites", "feed", "identity", "doctor", "serve", "agent-help",
+                           "new", "dev", "test", "lint", "tools", "submit"})
 WEBCLI_DOCS = "https://github.com/truefrontier/webcli/blob/main/docs/"
 # The best doc in webcli's docs/ for each built-in; one without a doc gets no "docs" key.
 DOCS = {"amazon": "amazon-site.md", "gsc": "gsc-site.md", "messages": "messages-site.md",
@@ -108,6 +113,24 @@ def check_builtin(entry: dict, where: str) -> list[str]:
         if wrong else []
 
 
+def reserved_names(tools: list) -> set[str]:
+    """The names webcli won't load a tool by (webcli/sites/__init__.py skips it, and `webcli tools install` refuses
+    it): its commands, its built-in sites, the providers they sign in as, and "none". Read from the webcli this Python
+    imports; without one, CORE_COMMANDS plus the built-ins in index.json `tools`."""
+    builtins = [t for t in tools if isinstance(t, dict) and t.get("builtin") is True]
+    listed = {t.get("name") for t in builtins} | {t.get("identity") for t in builtins}
+    try:
+        from webcli.core.manifest_schema import CORE_COMMANDS as commands
+        from webcli.sites import BUILTIN
+        from webcli.sites.base import NO_IDENTITY
+    except ImportError:
+        return listed | CORE_COMMANDS | {"none"}
+    # The official sites only, as webcli loads them ("module:ATTR"); never a community tool's code.
+    official = [getattr(importlib.import_module(module), attr)
+                for module, _, attr in (target.partition(":") for target in BUILTIN.values())]
+    return listed | commands | set(BUILTIN) | {site.provider for site in official} | {NO_IDENTITY}
+
+
 def check_index() -> list[str]:
     """index.json: the right shape, and each community entry pinned to a commit in this branch's history whose files
     and manifest match it. Official built-ins are checked for shape only."""
@@ -131,8 +154,9 @@ def check_index() -> list[str]:
             problems.append(f'index.json revoked: {item!r} must be a name or {{"name", "versions", "reason"}}')
     names = [t.get("name") for t in tools if isinstance(t, dict)]
     problems += [f"index.json: {n!r} is listed twice" for n in sorted({n for n in names if names.count(n) > 1})]
+    reserved = reserved_names(tools)
     for entry in tools:
-        where = f"index.json tool {entry.get('name') if isinstance(entry, dict) else entry!r}"
+        where = f"index.json tool {entry.get('name')}" if isinstance(entry, dict) else f"index.json tool {entry!r}"
         if isinstance(entry, dict) and entry.get("builtin") is True:
             problems += check_builtin(entry, where)
             continue
@@ -151,6 +175,10 @@ def check_index() -> list[str]:
         wrong = [key for key, ok in shape.items() if not ok]
         if wrong:
             problems.append(f"{where}: bad {', '.join(wrong)} (path is tools/<name>, tier is \"community\")")
+            continue
+        if name in reserved:
+            problems.append(f"{where}: webcli won't load a tool by this name: it's one of webcli's commands, a "
+                            "built-in site, or the provider a built-in signs in as")
             continue
         if subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", commit, "HEAD"],
                           capture_output=True).returncode != 0:
@@ -226,6 +254,19 @@ def check_tool(folder: Path) -> list[str]:
     return problems
 
 
+COMPILED = (".pyc", ".pyo", ".pyd", ".so")
+
+
+def tracked_compiled() -> list[str]:
+    """Tracked compiled Python, anywhere in the repo: a __pycache__/ folder, or a .pyc, .pyo, .pyd or .so file.
+    Reviewers read source, but Python can run a cached or compiled file instead (an unchecked-hash .pyc wins over the
+    .py beside it), and the pinned sha256 covers whatever is committed. `webcli lint` can't tell a committed cache
+    from Python's own, so this reads git's list of tracked files, not the disk."""
+    return [f"{path}: compiled Python is tracked; reviewers can't read it, so remove it (git rm --cached)"
+            for path in git("ls-files", "-z").split("\0")
+            if path and ("__pycache__" in path.split("/") or path.lower().endswith(COMPILED))]
+
+
 def check_secrets() -> list[str]:
     """Every file in the repo, with the secret patterns `webcli lint` uses (it already scanned the tool folders,
     fixtures included, more strictly)."""
@@ -238,9 +279,14 @@ def check() -> int:
     if shutil.which("webcli") is None:
         print("webcli isn't on PATH: pip install --pre 'truefrontier-webcli>=1.0.0rc1'", file=sys.stderr)
         return 2
-    problems = check_index() + webcli_reads_index() + same_hash_as_webcli()
+    problems = check_index() + webcli_reads_index() + same_hash_as_webcli() + tracked_compiled()
     for folder in tool_folders():
         problems += check_tool(folder)
+    if importlib.util.find_spec("pytest") is not None:
+        print("== scripts: library.py's own tests", flush=True)
+        if subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "scripts"],
+                          cwd=ROOT).returncode:
+            problems.append("scripts: pytest failed (its output is above)")
     problems += check_secrets()
     if problems:
         print(f"\n{len(problems)} problem(s):", file=sys.stderr)
@@ -249,6 +295,12 @@ def check() -> int:
         return 1
     print(f"\nok: index.json, {len(tool_folders())} tool folders, secrets")
     return 0
+
+
+def keeps_verified(old: dict | None, new: dict) -> bool:
+    """A re-pin stays verified only when its files are the ones a maintainer verified: the same sha256. A new version
+    always changes the sha256 (webcli-tool.toml is one of the files), so it starts unverified."""
+    return bool(old and old["verified"] and old["sha256"] == new["sha256"])
 
 
 def pin(name: str, commit: str = "HEAD") -> int:
@@ -263,9 +315,13 @@ def pin(name: str, commit: str = "HEAD") -> int:
     if old and old.get("builtin") is True:
         print(f"{name} is an official built-in; `python scripts/library.py builtins` writes its entry", file=sys.stderr)
         return 1
+    if name in reserved_names(index["tools"]):
+        print(f"webcli won't load a tool named {name!r}: it's one of webcli's commands, a built-in site, or the "
+              "provider a built-in signs in as", file=sys.stderr)
+        return 1
     entry = {"name": name, "version": manifest["version"], "summary": manifest["summary"], "commit": commit,
-             "sha256": tree_sha256(commit, path), "path": path, "tier": "community",
-             "verified": bool(old and old["verified"] and old["version"] == manifest["version"])}
+             "sha256": tree_sha256(commit, path), "path": path, "tier": "community"}
+    entry["verified"] = keeps_verified(old, entry)
     index["tools"] = sorted([t for t in index["tools"] if t["name"] != name] + [entry], key=lambda t: t["name"])
     INDEX.write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
     print(f"pinned {name} {entry['version']} at {commit[:12]} (sha256 {entry['sha256'][:16]}...)")

@@ -27,6 +27,7 @@ CI checks every rule it can. Reviewers check the rest.
 |---|---|
 | The manifest is valid, and the tool's `ADAPTER` agrees with it. | CI (`webcli lint`) |
 | The name is 2 to 32 lowercase letters and digits, with no hyphens. The folder is `tools/<name>/`. | CI |
+| The name isn't one of webcli's commands, a built-in site, or the provider a built-in signs in as (`feed`, `gmail`, `google`). webcli won't load a tool by such a name. | CI |
 | `hosts` lists every host the tool reaches, and the tool's guard refuses every other host. | CI checks the guard; reviewers check the list is complete |
 | Read-only by default. A command that changes anything is marked `writes = true`, takes `--confirm`, and is a dry run without it. A read-only tool's guard refuses PUT, PATCH, and DELETE. | CI (`webcli lint`); reviewers read every write |
 | A command that messages, posts, or invites someone is also marked `sends_to_people = true`. | Reviewers |
@@ -37,6 +38,7 @@ CI checks every rule it can. Reviewers check the rest.
 | Fixtures (`tests/fixtures/`) hold no one's personal details: no real names, email addresses, phone numbers, messages, or account IDs. Replace them with made-up ones. | CI catches tokens and emails; reviewers read every fixture |
 | `maintainers` lists your GitHub login, and you'll fix the tool when the site changes. | Reviewers |
 | No code that hides what it does: no downloading and running code, no obfuscation, no reaching outside the tool's hosts by other means. | Reviewers |
+| Source only: no compiled Python (`__pycache__/`, `.pyc`, `.pyo`, `.pyd`, `.so`) anywhere in the repo. Reviewers read the source, and Python can run a compiled file in its place. | CI |
 
 ## Send it
 

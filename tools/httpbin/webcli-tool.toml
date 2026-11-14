@@ -1,7 +1,7 @@
 # What this tool is and may do. A person reads this before installing it, and webcli holds the tool to it.
 # The rules: https://github.com/truefrontier/webcli/blob/main/docs/webcli-tool-manifest.md
 name = "httpbin"
-version = "0.1.0"
+version = "0.1.1"
 adapter_api = 1
 requires_webcli = ">=1.0.0rc1,<2"
 summary = "httpbin.org, read-only demo: your public IP, the headers it sees, a fresh UUID. No sign-in, no browser"
