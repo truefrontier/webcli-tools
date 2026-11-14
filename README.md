@@ -26,7 +26,7 @@ webcli httpbin ip
 | Its own identity | A tool signs in as `<tool>:default`. It can't use one of your existing logins, like `google:default`, unless you run `webcli tools grant <tool> <identity>`. |
 | Its own hosts | Its browser pages can reach only the hosts in its manifest. webcli blocks the rest. |
 | Read-only by default | A command that changes anything on a site must say so in the manifest (`writes = true`). It runs as a dry run unless you pass `--confirm`. |
-| No shadowing | A tool can't take the name of a built-in site or a webcli command. |
+| No shadowing | A tool can't take the name of a built-in site, the provider a built-in signs in as, or a webcli command. |
 | A kill switch | A tool listed under `revoked` in `index.json` stops running everywhere webcli refreshes the index. |
 
 These rules catch honest mistakes. They don't make a stranger's code safe: a tool is Python that runs as you, next to your signed-in sessions. Install only tools you've read, or tools from people you trust. A tool that calls a site without a browser (like `httpbin`) also has to keep to its hosts itself; reviewers check that.
